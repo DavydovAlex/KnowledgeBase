@@ -73,6 +73,7 @@ namespace KnowledgeBase
                     File.Delete(Params.TempFolder + @"\" + file.Name);
                     Thread.Sleep(1000);
                     i = 0;
+                    //Ожидание удаления файла из папки
                     while (Directory.GetFiles(Params.TempFolder).Length != 0)
                     {
                         Thread.Sleep(100);
@@ -109,6 +110,10 @@ namespace KnowledgeBase
                 }
             }
         }
+        /// <summary>
+        /// Запись страниц в БД
+        /// </summary>
+        /// <param name="page"></param>
         public void Traversing(Page page)
         {
             Driver.Navigate().GoToUrl(page.URL);
@@ -204,6 +209,28 @@ namespace KnowledgeBase
             byte[] result = (byte[])selectId.ExecuteScalar();
             File.WriteAllBytes(Params.TempFolder + @"\" + "123.zip",result);
         }
+
+
+
+        public void InsertQueryString(string table,NameValueCollection data)
+        {
+            string query = String.Format("INSERT INTO {0} ",table);
+            string columns=" (";
+            string values=" (";
+
+            foreach(string column in data.Keys)
+            {
+                string value = data[column];
+                columns += String.Format(" {0},", column);
+                values += String.Format(" '{0}',", value);
+            }
+            columns=columns.Substring(0, columns.Length - 1)+")";
+            values = values.Substring(0, values.Length - 1)+")";
+            query += columns + " VALUES " + values+";";
+
+        }
+
+
         /// <summary>
         /// Запись страницы в БД
         /// </summary>
@@ -228,6 +255,10 @@ namespace KnowledgeBase
             int result=(Int32)selectId.ExecuteScalar();
             return result;
         }
+        /// <summary>
+        /// Выбор файлов из БД
+        /// </summary>
+        /// <returns></returns>
         public List<Files> SelectFiles()
         {
             List<Files> result = new List<Files>();
@@ -264,29 +295,17 @@ namespace KnowledgeBase
             selectedFiles.Close();
             return result;
         }
+        /// <summary>
+        /// Выбор страницы по Id(необходимо продумать при приходе 0 ссылки)
+        /// </summary>
+        /// <param name="Id"></param>
+        /// <returns></returns>
         public Page SelectPage(int Id)
-        {
-            List<Page> result = new List<Page>();
+        {            
             MySqlCommand selectInfo = DB.CreateCommand();
             selectInfo.CommandText = "SELECT * FROM pages WHERE Id="+Id;
             MySqlDataReader selectedInfo = selectInfo.ExecuteReader();
-            while (selectedInfo.Read())
-            {
-                Page nextPage = new Page
-                {
-                    Id = selectedInfo.GetInt32(0),
-                    URL = selectedInfo.GetString(1),
-                    Parent = selectedInfo.GetInt32(2),
-                    Author = selectedInfo.GetString(3),
-                    Updated = selectedInfo.GetDateTime(4).ToString(),
-                    Header = selectedInfo.GetString(5),
-                    InnerText = selectedInfo.GetString(6),
-                    IsTerminate = selectedInfo.GetInt32(7),
-                    InfoNotAllowed = selectedInfo.GetInt32(8),
-                    ChildCount = selectedInfo.GetInt32(9)
-                };
-                result.Add(nextPage);
-            }
+            List<Page> result = Page.SelectPages(selectedInfo);
 
             selectedInfo.Close();
             
@@ -294,53 +313,21 @@ namespace KnowledgeBase
         }
         public List<Page> SelectTerminatePages()
         {
-            List<Page> result = new List<Page>();
+            
             MySqlCommand selectInfo = DB.CreateCommand();
             selectInfo.CommandText = "SELECT * FROM pages WHERE IsTerminate=1";
             MySqlDataReader selectedInfo = selectInfo.ExecuteReader();
-            while (selectedInfo.Read())
-            {
-                Page nextPage = new Page
-                {
-                    Id = selectedInfo.GetInt32(0),
-                    URL=selectedInfo.GetString(1),
-                    Parent=selectedInfo.GetInt32(2),
-                    Author=selectedInfo.GetString(3),
-                    Updated=selectedInfo.GetDateTime(4).ToString(),
-                    Header=selectedInfo.GetString(5),
-                    InnerText=selectedInfo.GetString(6),
-                    IsTerminate=selectedInfo.GetInt32(7),
-                    InfoNotAllowed=selectedInfo.GetInt32(8),
-                    ChildCount=selectedInfo.GetInt32(9)
-                };
-                result.Add(nextPage);
-            }
+            List<Page> result = Page.SelectPages(selectedInfo);
             selectedInfo.Close();
             return result;
         }
         public List<Page> SelectNonTerminatePages()
         {
-            List<Page> result = new List<Page>();
+            
             MySqlCommand selectInfo = DB.CreateCommand();
             selectInfo.CommandText = "SELECT * FROM pages WHERE IsTerminate=0 ORDER BY Id";
             MySqlDataReader selectedInfo = selectInfo.ExecuteReader();
-            while (selectedInfo.Read())
-            {
-                Page nextPage = new Page
-                {
-                    Id = selectedInfo.GetInt32(0),
-                    URL = selectedInfo.GetString(1),
-                    Parent = selectedInfo.GetInt32(2),
-                    Author = selectedInfo.GetString(3),
-                    Updated = selectedInfo.GetDateTime(4).ToString(),
-                    Header = selectedInfo.GetString(5),
-                    InnerText = selectedInfo.GetString(6),
-                    IsTerminate = selectedInfo.GetInt32(7),
-                    InfoNotAllowed = selectedInfo.GetInt32(8),
-                    ChildCount = selectedInfo.GetInt32(9)
-                };
-                result.Add(nextPage);
-            }
+            List<Page> result = Page.SelectPages(selectedInfo);
             selectedInfo.Close();
             return result;
         }
@@ -396,6 +383,29 @@ namespace KnowledgeBase
         public int InfoNotAllowed { get; set; }
         public int ChildCount { get; set; }
         public List<Files> Files { get; set; }
+
+        public static List<Page> SelectPages(MySqlDataReader select)
+        {
+            List<Page> result = new List<Page>();
+            while (select.Read())
+            {
+                Page nextPage = new Page
+                {
+                    Id = select.GetInt32(0),
+                    URL = select.GetString(1),
+                    Parent = select.GetInt32(2),
+                    Author = select.GetString(3),
+                    Updated = select.GetDateTime(4).ToString(),
+                    Header = select.GetString(5),
+                    InnerText = select.GetString(6),
+                    IsTerminate = select.GetInt32(7),
+                    InfoNotAllowed = select.GetInt32(8),
+                    ChildCount = select.GetInt32(9)
+                };
+                result.Add(nextPage);
+            }
+            return result;
+        }
     }
     public class Files
     {
@@ -444,8 +454,10 @@ namespace KnowledgeBase
             //kb.Traversing(rootPage);
             //kb.AddFiles();
 
-
-
+            NameValueCollection cc = new NameValueCollection();
+            cc.Add("Id", "12544");
+            cc.Add("sssss", "ssssscdecde");
+            kb.InsertQueryString("table",cc);
             WikiApi wikiApi = new WikiApi()
             {
                 Host = "http://localhost",
@@ -491,11 +503,12 @@ namespace KnowledgeBase
             {
                 Page parent = kb.SelectPage(page.Parent);
                 string res;
-                if(!page.InnerText.Contains("<"))
-                {
-                    string text = page.InnerText + Environment.NewLine + "[[Category:" + parent.Header + "]]";
+                string innerText = HttpUtility.HtmlDecode(page.InnerText);
+                string divOpen=Regex.Replace(innerText, @"<[\s]*pre", "<div nowrap=\"true\"");
+                string divClose= Regex.Replace(divOpen, @"</[\s]*pre[\s]*>", "</div>");
+                string text = divClose+ Environment.NewLine + "[[Category:" + parent.Header + "]]";
                     res = wikiApi.EditPage(page.Header,text);
-                }
+
                     
             }
         }
