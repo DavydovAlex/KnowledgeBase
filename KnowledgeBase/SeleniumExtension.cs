@@ -45,8 +45,14 @@ public static class SeleniumExtension
 
     
 }
+
 public static class StringExtension
 {
+    /// <summary>
+    /// Принимает XPath строку и преобразует в By
+    /// </summary>
+    /// <param name="path"></param>
+    /// <returns></returns>
     public static By ToByXPath(this string path)
     {
         return By.XPath(path);
@@ -61,11 +67,8 @@ public static class StringExtension
 [Serializable]
 public class Field
     {
-    private string value;
-    private string path;
-
-    public string Value { get => value; set => this.value = value; }
-    public string Path { get => path; set => path = value; }
+    public string Value { get; set; }
+    public string Path { get; set; }
 
     public Field(string Val,string P)
     {
@@ -78,7 +81,10 @@ public class Field
     }
     }
 
-
+/// <summary>
+/// Класс содержит функции для сериализации/десериализации
+/// </summary>
+/// <typeparam name="T"></typeparam>
 public class Serializer<T> where T : AParams, new()
 {
     public T Fields { get; set; }
@@ -129,22 +135,20 @@ public abstract class AParams
 }
 
 /// <summary>
-/// Наименования полей из которых берутся данные по БЗ
+/// Наименования полей для поиска из которых берутся данные по БЗ
 /// </summary>
 public class KnowledgeBaseParams:AParams
 {
+    public string Category { get; set; }//Поиск категории в дереве
+    public string Article { get; set; }//Поиск статьи в дереве
+    //public string CategoryTitle { get; set; }
+    public string ArticleTitle { get; set; }//Заголовок статьи
+    public string ArticleContent { get; set; }//Текст статьи
+    public string Attachements { get; set; }//Прикрепленные файлы
+    public string AuthorDateInfo { get; set; }//Поск строки в статье, содержащий инфу об авторе и последей редакции
+    public string InfoNotAllowed { get; set; }//Ссылка на статью, которая не имеет содержимого
 
-
-    public string Category { get; set; }
-    public string Article { get; set; }
-    public string CategoryTitle { get; set; }
-    public string ArticleTitle { get; set; }
-    public string ArticleContent { get; set; }
-    public string Attachements { get; set; }
-    public string AuthorDateInfo { get; set; }
-    public string InfoNotAllowed { get; set; }
-
-    public string TempFolder { get; set; }
+    public string TempFolder { get; set; }//Папка временных файлов, в которую сохраняются прикрепления
 
     public KnowledgeBaseParams()
     {
@@ -165,7 +169,7 @@ public class KnowledgeBaseParams:AParams
 
 
 /// <summary>
-/// Параметры авторизации
+/// Параметры авторизации на сайте Барса
 /// </summary>
 public class AuthFields : AParams
 {
@@ -186,7 +190,9 @@ public class AuthFields : AParams
 
 
 }
-
+/// <summary>
+/// Доступ к бд
+/// </summary>
 public class MySQLConnect:AParams
 {
     public string ServerName { get; set; }

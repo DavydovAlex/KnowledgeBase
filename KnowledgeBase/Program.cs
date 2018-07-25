@@ -24,7 +24,8 @@ namespace KnowledgeBase
     {
         IWebDriver Driver { get; }
         MySqlConnection DB { get; }
-        KnowledgeBaseParams Params { get; }
+        KnowledgeBaseParams Params { get; }//Параметры сохранееные в файле
+        public AuthFields AuthParams { get; set; }
         public KnowledgeBaseSaver(IWebDriver dr,MySqlConnection db, Serializer<KnowledgeBaseParams> kb)
         {
             Driver = dr;
@@ -32,89 +33,19 @@ namespace KnowledgeBase
             Params = kb.Fields;
             
         }
+
+        /****************************************************************************************************************/
+        ///public void TraversingPages(Page page);//Обход страниц в базе знаний БАРС и запись их в БД (Traversing-обход)
+        ///private string[] SplitNameSize(string str);//Обход конечных страниц и запись файлов в БД (Traversing- обход)
+        ///public void TraversingFiles();// Разбивает входную строку на пару состоящую из имени и размера файла
+        ///public void CreateWikiCategoreeTree();//Не помню зачем
+        /****************************************************************************************************************/
+        #region Selenium работа с сайтом ТП БАРС
         /// <summary>
-        /// Запись файлов в БД
-        /// </summary>
-        public void AddFiles()
-        {
-            List<Page> terminatePages=SelectTerminatePages();
-            foreach(Page terminatePage in terminatePages)
-            {
-                Driver.Navigate().GoToUrl(terminatePage.URL);
-                IReadOnlyCollection<IWebElement> attachmentItems = Driver.FindElements(Params.Attachements.ToByXPath());
-                List<Files> attachmentFiles = new List<Files>();
-                foreach (IWebElement attachment in attachmentItems)
-                {
-                    Files file = new Files();
-                    file.PID = terminatePage.Id;
-                    file.IsActual = 1;
-                    string g = attachment.GetAttribute("onclick");
-                    file.URL = Regex.Match(attachment.GetAttribute("onclick"), @"(?<=javascript: PopupSmallWindow\()[\S\s]+?(?=\);)").Value;
-
-                    string[] sizeName = SplitNameSize(attachment.Text);
-                    file.Size = sizeName[0];
-                    file.Name = sizeName[1];
-
-                    attachment.Click();
-                    Thread.Sleep(500);
-                    //Проверка на скачивание файла
-                    //если в папке 2 элемента, значит загрузка идет
-                    int i = 0;
-                    while (Directory.GetFiles(Params.TempFolder).Length == 2)
-                    {
-                        Thread.Sleep(100);
-                        i++;
-                        if (i == 200)
-                        {
-                            throw new FileNotFoundException();
-                        }
-                    }
-                    file.File = File.ReadAllBytes(Params.TempFolder + @"\" + file.Name);
-                    File.Delete(Params.TempFolder + @"\" + file.Name);
-                    Thread.Sleep(1000);
-                    i = 0;
-                    //Ожидание удаления файла из папки
-                    while (Directory.GetFiles(Params.TempFolder).Length != 0)
-                    {
-                        Thread.Sleep(100);
-                        i++;
-                        if (i == 2000)
-                            throw new FileNotFoundException();
-                    }
-                    AddFile(file);
-
-                }
-
-            }
-
-        }
-        public void CreateWikiCategoreeTree()
-        {
-            List<Page> nonTerminatePages = SelectNonTerminatePages();
-            foreach(Page page in nonTerminatePages)
-            {
-                if(page.Parent!=0)
-                {
-                    Page parent = new Page();
-                    foreach(Page parentPage in nonTerminatePages)
-                    {
-                        if(page.Parent==parentPage.Id)
-                        {
-                            parent = parentPage;
-                            break;
-                        }
-                            
-                    }
-
-
-                }
-            }
-        }
-        /// <summary>
-        /// Запись страниц в БД
+        /// Обход страниц в базе знаний БАРС и запись их в БД (Traversing-обход)
         /// </summary>
         /// <param name="page"></param>
-        public void Traversing(Page page)
+        public void TraversingPages(Page page)
         {
             Driver.Navigate().GoToUrl(page.URL);
             IReadOnlyCollection<IWebElement> categories = Driver.FindElements(Params.Category.ToByXPath());
@@ -133,36 +64,64 @@ namespace KnowledgeBase
                         Driver.FindElement(Params.InfoNotAllowed.ToByXPath());
                         page.InfoNotAllowed = 1;
                         page.Updated = "0001-01-01 00:00:00";
-                        throw new Exception();
+                        throw new Exception();//позволяет пропустить следующие строки
                     }
-                    catch(NoSuchElementException e)
+                    catch (NoSuchElementException e)
                     {
-                        
+
                     }
                     page.InfoNotAllowed = 0;
-                    page.Header = Driver.FindElement(Params.ArticleTitle.ToByXPath()).Text;                   
+                    page.Header = Driver.FindElement(Params.ArticleTitle.ToByXPath()).Text;
                     page.InnerText = HttpUtility.HtmlEncode(Driver.FindElement(Params.ArticleContent.ToByXPath()).GetAttribute("innerHTML"));
                     string authorDateInfo = Driver.FindElement(Params.AuthorDateInfo.ToByXPath()).Text;
                     page.Author = Regex.Match(authorDateInfo, @"(?<=Автор[\s]+?)[\S\s]+?(?=[\s]+?на)").Value;
                     string date = Regex.Match(authorDateInfo, @"(?<=[\s]+?на[\s]+?)[\s\S]+").Value;
                     page.Updated = date == String.Empty ? "0001-01-01 00:00:00" : DateTime.Parse(date.Replace('.', '/')).ToString("yyyy-MM-dd HH:mm:00");
-                    page.Id = AddPage(page);
+                    
+                    try
+                    {
+                        List<Page> isPageExist = SelectPages(String.Format("SELECT * FROM pages WHERE URL='{0}' ORDER BY Updated DESC", page.URL));
+                        string ss = DateTime.Parse(isPageExist[0].Updated.Replace('.', '/')).ToString("yyyy-MM-dd HH:mm:00");
+                        if (page.Updated != DateTime.Parse(isPageExist[0].Updated.Replace('.', '/')).ToString("yyyy-MM-dd HH:mm:00")) 
+                        {
+                            //NameValueCollection updParams = new NameValueCollection();
+                            //updParams.Add();
+                            //Update("pages",,);
+                            //int newPage=
+                            page.Id = InsertPage(page);
+                        }
+                    }
+                    catch
+                    {                       
+                        page.Id = InsertPage(page);
+                    }
+                    
                 }
-                catch(FileNotFoundException e)
+                catch (FileNotFoundException e)
                 {
 
                 }
                 catch (Exception ex)
                 {
-
+                    //вплоть до сюда
                 }
             }
-            else
+            else//не конечная страница т.е. раздел
             {
-                page.IsTerminate = 0;
-                page.InfoNotAllowed = 0;
-                page.Updated = "0001-01-01 00:00:00";
-                page.Id = AddPage(page);
+                //Проверяем есть ли страница в БД по адресу
+                try
+                {
+                    Page isPageExist = SelectPages(String.Format("SELECT * FROM pages WHERE URL='{0}'",page.URL))[0];
+                    page.Id = isPageExist.Id;
+                }
+                catch//(ArgumentOutOfRangeException e)
+                {
+                    page.IsTerminate = 0;
+                    page.InfoNotAllowed = 0;
+                    page.Updated = "0001-01-01 00:00:00";
+                    page.Id = InsertPage(page);
+                }
+                
                 foreach (IWebElement category in references)
                 {
                     Page nextPage = new Page();
@@ -173,7 +132,7 @@ namespace KnowledgeBase
                 foreach (Page childPage in childPages)
                 {
                     childPage.Parent = page.Id;
-                    Traversing(childPage);
+                    TraversingPages(childPage);
                 }
             }
         }
@@ -185,22 +144,164 @@ namespace KnowledgeBase
         /// string[0]-имя
         /// string[1]-размер
         /// </returns>
-        public string[] SplitNameSize(string str)
+        private string[] SplitNameSize(string str)
         {
             string[] result = new string[2];
             int k = 0;
-            for (int i = str.Length-1; i >= 0; i--)
+            for (int i = str.Length - 1; i >= 0; i--)
             {
-                if(str[i]=='(')
+                if (str[i] == '(')
                 {
                     k = i;
                     break;
                 }
             }
             result[0] = Regex.Match(str.Substring(k), @"(?<=\()[\S\s]+?(?=\))").Value;
-            result[1] = Regex.Match(str.Substring(0,k-1), @"[\S\s]+").Value.Trim(' ');
+            result[1] = Regex.Match(str.Substring(0, k - 1), @"[\S\s]+").Value.Trim(' ');
             return result;
         }
+
+        /// <summary>
+        /// Обход конечных страниц и запись файлов в БД (Traversing- обход)
+        /// </summary>
+        public void TraversingFiles()
+        {
+            List<Page> terminatePages = SelectTerminatePages();
+            foreach (Page terminatePage in terminatePages)
+            {
+                Driver.Navigate().GoToUrl(terminatePage.URL);
+                IReadOnlyCollection<IWebElement> attachmentItems = Driver.FindElements(Params.Attachements.ToByXPath());
+                List<Files> attachmentFiles = new List<Files>();
+                foreach (IWebElement attachment in attachmentItems)
+                {
+                    bool HaveError = true;
+                    int errorCount = 0;
+                    while(HaveError)
+                    {
+                        try
+                        {
+                            if (errorCount == 10)
+                            {
+                                errorCount = 0;
+                                Driver.Authorise(AuthParams.Login.Path.ToByXPath(), AuthParams.Login.Value, AuthParams.Password.Path.ToByXPath(), AuthParams.Password.Value, AuthParams.SendButton.ToByXPath(),10);
+                                Driver.Navigate().GoToUrl(terminatePage.URL);
+                            }
+                            string[] files = Directory.GetFiles(Params.TempFolder);
+                            foreach (string name in files)
+                            {
+                                File.Delete(name);
+                            }
+
+
+                            Files file = new Files();
+                            file.PID = terminatePage.Id;
+                            file.IsActual = 1;
+                            string g = attachment.GetAttribute("onclick");
+                            file.URL = Regex.Match(attachment.GetAttribute("onclick"), @"(?<=javascript: PopupSmallWindow\()[\S\s]+?(?=\);)").Value;
+
+                            //List<>
+                            
+                            string[] sizeName = SplitNameSize(attachment.Text);
+                            file.Size = sizeName[0];
+                            file.Name = sizeName[1];
+
+                            attachment.Click();
+                            Thread.Sleep(1000);
+                            //Проверка на скачивание файла
+                            //если в папке 2 элемента, значит загрузка идет
+                            int i = 0;
+                            while (Directory.GetFiles(Params.TempFolder).Length == 2)
+                            {
+                                Thread.Sleep(100);
+                                i++;
+                                if (i == 600)
+                                {
+                                    throw new FileNotFoundException();
+                                }
+                            }
+                            string fileToRemove = Directory.GetFiles(Params.TempFolder)[0];
+                            file.File = File.ReadAllBytes(Directory.GetFiles(Params.TempFolder)[0]);
+                            //file.File = File.ReadAllBytes(Params.TempFolder + @"\"+file.Name);// + Regex.Replace(file.Name, @"[\s]+", " "));
+                            //File.Delete(Params.TempFolder + @"\" + file.Name);
+                            string[] filesInFolder = Directory.GetFiles(Params.TempFolder);
+                            foreach (string fileInFolder in filesInFolder)
+                            {
+                                File.Delete(fileInFolder);
+                            }
+                            Thread.Sleep(1000);
+                            i = 0;
+                            //Ожидание удаления файла из папки
+                            while (Directory.GetFiles(Params.TempFolder).Length != 0)
+                            {
+                                Thread.Sleep(100);
+                                i++;
+                                if (i == 600)
+                                    throw new FileNotFoundException();
+                            }
+                            InsertFile(file);
+                            HaveError = false;
+                            errorCount = 0;
+                        }
+                        catch (Exception e)
+                        {
+
+                            errorCount++;
+                            try
+                            {
+                                string[] files = Directory.GetFiles(Params.TempFolder);
+                                foreach (string file in files)
+                                {
+                                    File.Delete(file);
+                                }
+                            }
+                            catch
+                            {
+
+                            }
+                            
+
+                        }
+                    }
+                
+
+                }
+
+            }
+
+        }
+
+        /// <summary>
+        /// Не помню зачем
+        /// </summary>
+        public void CreateWikiCategoreeTree()
+        {
+            List<Page> nonTerminatePages = SelectNonTerminatePages();
+            foreach (Page page in nonTerminatePages)
+            {
+                if (page.Parent != 0)
+                {
+                    Page parent = new Page();
+                    foreach (Page parentPage in nonTerminatePages)
+                    {
+                        if (page.Parent == parentPage.Id)
+                        {
+                            parent = parentPage;
+                            break;
+                        }
+
+                    }
+
+
+                }
+            }
+        }
+        #endregion 
+
+
+        #region Хлам для тестирования 
+        /// <summary>
+        /// Выборка данных из поля Blob БД и преобразование их в файл
+        /// </summary>
         public void BlobTest()
         {
             string select = "SELECT File FROM files WHERE Id=1;";
@@ -209,51 +310,93 @@ namespace KnowledgeBase
             byte[] result = (byte[])selectId.ExecuteScalar();
             File.WriteAllBytes(Params.TempFolder + @"\" + "123.zip",result);
         }
+        #endregion
 
 
+        #region Работа с БД(чтение/запись)
 
-        public void InsertQueryString(string table,NameValueCollection data)
+        /// <summary>
+        /// Шаблон для выполнения функции вставки Insert
+        /// </summary>
+        /// <param name="table"></param>
+        /// <param name="data"></param>
+        public void Insert(string table, NameValueCollection data)
         {
-            string query = String.Format("INSERT INTO {0} ",table);
-            string columns=" (";
-            string values=" (";
+            string query = String.Format("INSERT INTO {0} ", table);
+            string columns = " (";
+            string values = " (";
 
-            foreach(string column in data.Keys)
+            foreach (string column in data.Keys)
             {
                 string value = data[column];
                 columns += String.Format(" {0},", column);
                 values += String.Format(" '{0}',", value);
             }
-            columns=columns.Substring(0, columns.Length - 1)+")";
-            values = values.Substring(0, values.Length - 1)+")";
-            query += columns + " VALUES " + values+";";
+            columns = columns.Substring(0, columns.Length - 1) + ")";
+            values = values.Substring(0, values.Length - 1) + ")";
+            query += columns + " VALUES " + values + ";";
 
+            MySqlScript insertScript = new MySqlScript(DB, query);
+            insertScript.Execute();
         }
-
 
         /// <summary>
         /// Запись страницы в БД
         /// </summary>
         /// <param name="page"></param>
         /// <returns></returns>
-        public int AddPage(Page page)
+        public int InsertPage(Page page)
         {
-            string insert = "INSERT INTO pages(URL,Parent,Header,InnerText,IsTerminate,Updated,Author,InfoNotAllowed,ChildCount) VALUES ('" + page.URL + "','" +
-                                                                         page.Parent + "','" +
-                                                                         page.Header + "','" +
-                                                                         page.InnerText + "','" +
-                                                                         page.IsTerminate + "','" +
-                                                                         page.Updated + "','"+
-                                                                         page.Author+ "','" +
-                                                                         page.InfoNotAllowed + "','" +
-                                                                         page.ChildCount + "');";
-            MySqlScript insertScript = new MySqlScript(DB, insert);
-            insertScript.Execute();
-            string select= "SELECT Id FROM pages WHERE URL='"+page.URL+"';";
+            //Page.PagesColumns pc = new Page.PagesColumns();
+            NameValueCollection data = page.GetNameValueCollection(PageColumns.URL,
+                                                                   PageColumns.Parent,
+                                                                   PageColumns.Header,
+                                                                   PageColumns.InnerText,
+                                                                   PageColumns.IsTerminate,
+                                                                   PageColumns.Updated,
+                                                                   PageColumns.Author,
+                                                                   PageColumns.InfoNotAllowed,
+                                                                   PageColumns.ChildCount);
+
+            Insert("pages", data);
+            string select = "SELECT Id FROM pages WHERE URL='" + page.URL + "';";
             MySqlCommand selectId = DB.CreateCommand();
             selectId.CommandText = select;
-            int result=(Int32)selectId.ExecuteScalar();
+            int result = (Int32)selectId.ExecuteScalar();
             return result;
+        }
+        /// <summary>
+        /// Запись файла в БД
+        /// </summary>
+        /// <param name="file"></param>
+        public void InsertFile(Files file)
+        {
+
+            var command = new MySqlCommand("", DB);
+
+            command.CommandText = "INSERT INTO files(PID,Name,Size,URL,IsActual,File) VALUES (@PID,@Name,@Size,@URl,@IsActual,@File);";
+            var paramPID = new MySqlParameter("@PID", MySqlDbType.Int32, 11);
+            var paramName = new MySqlParameter("@Name", MySqlDbType.VarChar, 500);
+            var paramIsActual = new MySqlParameter("@IsActual", MySqlDbType.Int32, 2);
+            var paramSize = new MySqlParameter("@Size", MySqlDbType.VarChar, 100);
+            var paramURL = new MySqlParameter("@URL", MySqlDbType.VarChar, 500);
+            var paramFile = new MySqlParameter("@File", MySqlDbType.LongBlob);
+
+            paramPID.Value = file.PID;
+            paramName.Value = file.Name;
+            paramIsActual.Value = file.IsActual;
+            paramSize.Value = file.Size;
+            paramURL.Value = file.URL;
+            paramFile.Value = file.File;
+
+            command.Parameters.Add(paramPID);
+            command.Parameters.Add(paramName);
+            command.Parameters.Add(paramIsActual);
+            command.Parameters.Add(paramSize);
+            command.Parameters.Add(paramURL);
+            command.Parameters.Add(paramFile);
+
+            command.ExecuteNonQuery();
         }
         /// <summary>
         /// Выбор файлов из БД
@@ -283,7 +426,7 @@ namespace KnowledgeBase
                 int curPos = 0;
                 while (bytesRead < size)
                 {
-                    if(size-bytesRead>=bufferSize)
+                    if (size - bytesRead >= bufferSize)
                         bytesRead += selectedFiles.GetBytes(6, curPos, buf, curPos, bufferSize);
                     else
                         bytesRead += selectedFiles.GetBytes(6, curPos, buf, curPos, (int)(size - bytesRead));
@@ -301,74 +444,121 @@ namespace KnowledgeBase
         /// <param name="Id"></param>
         /// <returns></returns>
         public Page SelectPage(int Id)
-        {            
-            MySqlCommand selectInfo = DB.CreateCommand();
-            selectInfo.CommandText = "SELECT * FROM pages WHERE Id="+Id;
-            MySqlDataReader selectedInfo = selectInfo.ExecuteReader();
-            List<Page> result = Page.SelectPages(selectedInfo);
+        {
+            //MySqlCommand selectInfo = DB.CreateCommand();
+            //selectInfo.CommandText = "SELECT * FROM pages WHERE Id=" + Id;
+            //MySqlDataReader selectedInfo = selectInfo.ExecuteReader();
+            //List<Page> result = Page.SelectPages(selectedInfo);
 
-            selectedInfo.Close();
-            
-            return result[0];
+            //selectedInfo.Close();
+            try
+            {
+                List<Page> result = SelectPages("SELECT * FROM pages WHERE Id=" + Id);
+                //if (result.Count == 0)
+                //    throw new NotFoundException();
+                return result[0];
+            }
+            catch
+            {
+                throw new NotFoundException();
+            }
+
         }
         public List<Page> SelectTerminatePages()
         {
-            
-            MySqlCommand selectInfo = DB.CreateCommand();
-            selectInfo.CommandText = "SELECT * FROM pages WHERE IsTerminate=1";
-            MySqlDataReader selectedInfo = selectInfo.ExecuteReader();
-            List<Page> result = Page.SelectPages(selectedInfo);
-            selectedInfo.Close();
+
+            //MySqlCommand selectInfo = DB.CreateCommand();
+            //selectInfo.CommandText = "SELECT * FROM pages WHERE IsTerminate=1";
+            //MySqlDataReader selectedInfo = selectInfo.ExecuteReader();
+            //List<Page> result = Page.SelectPages(selectedInfo);
+            //selectedInfo.Close();
+            List<Page> result = SelectPages("SELECT * FROM pages WHERE IsTerminate=1");
             return result;
         }
         public List<Page> SelectNonTerminatePages()
         {
-            
+
+            //MySqlCommand selectInfo = DB.CreateCommand();
+            //selectInfo.CommandText = "SELECT * FROM pages WHERE IsTerminate=0 ORDER BY Id";
+            //MySqlDataReader selectedInfo = selectInfo.ExecuteReader();
+            //List<Page> result = Page.SelectPages(selectedInfo);
+            //selectedInfo.Close();
+            List<Page> result = SelectPages("SELECT * FROM pages WHERE IsTerminate=0 ORDER BY Id");
+            return result;
+        }
+        /// <summary>
+        /// Выборка из таблицы Pages по заданной строке запроса
+        /// </summary>
+        /// <param name="query"></param>
+        /// <returns></returns>
+        public  List<Page> SelectPages(string query)
+        {
+
+            List<Page> result = new List<Page>();
             MySqlCommand selectInfo = DB.CreateCommand();
-            selectInfo.CommandText = "SELECT * FROM pages WHERE IsTerminate=0 ORDER BY Id";
+            selectInfo.CommandText = query;
             MySqlDataReader selectedInfo = selectInfo.ExecuteReader();
-            List<Page> result = Page.SelectPages(selectedInfo);
+            while (selectedInfo.Read())
+            {
+                Page nextPage = new Page
+                {
+                    Id = selectedInfo.GetInt32(0),
+                    URL = selectedInfo.GetString(1),
+                    Parent = selectedInfo.GetInt32(2),
+                    Author = selectedInfo.GetString(3),
+                    Updated = selectedInfo.GetDateTime(4).ToString(),
+                    Header = selectedInfo.GetString(5),
+                    InnerText = selectedInfo.GetString(6),
+                    IsTerminate = selectedInfo.GetInt32(7),
+                    InfoNotAllowed = selectedInfo.GetInt32(8),
+                    ChildCount = selectedInfo.GetInt32(9),
+                    IsActual=selectedInfo.GetInt32(10)
+                };
+                result.Add(nextPage);
+            }
             selectedInfo.Close();
             return result;
         }
-        public void AddFile(Files file)
+
+        public void UpdatePage(Page page)
         {
+            NameValueCollection updateParams = page.GetNameValueCollection(PageColumns.Author,
+                                                                            PageColumns.ChildCount,
+                                                                            PageColumns.Header,
+                                                                            PageColumns.InfoNotAllowed,
+                                                                            PageColumns.InnerText,
+                                                                            PageColumns.IsActual,
+                                                                            PageColumns.IsTerminate,
+                                                                            PageColumns.Parent,
+                                                                            PageColumns.Updated,
+                                                                            PageColumns.URL
+                                                                         );
+
             
-            var command = new MySqlCommand("", DB);
-
-            command.CommandText = "INSERT INTO files(PID,Name,Size,URL,IsActual,File) VALUES (@PID,@Name,@Size,@URl,@IsActual,@File);";
-            var paramPID = new MySqlParameter("@PID", MySqlDbType.Int32, 11);
-            var paramName = new MySqlParameter("@Name", MySqlDbType.VarChar, 500);
-            var paramIsActual = new MySqlParameter("@IsActual", MySqlDbType.Int32, 2);
-            var paramSize = new MySqlParameter("@Size", MySqlDbType.VarChar, 100);
-            var paramURL = new MySqlParameter("@URL", MySqlDbType.VarChar, 500);
-            var paramFile = new MySqlParameter("@File", MySqlDbType.LongBlob);
-
-            paramPID.Value = file.PID;
-            paramName.Value = file.Name;
-            paramIsActual.Value = file.IsActual;
-            paramSize.Value = file.Size;
-            paramURL.Value = file.URL;
-            paramFile.Value = file.File;
-
-            command.Parameters.Add(paramPID);
-            command.Parameters.Add(paramName);
-            command.Parameters.Add(paramIsActual);
-            command.Parameters.Add(paramSize);
-            command.Parameters.Add(paramURL);
-            command.Parameters.Add(paramFile);
-
-            command.ExecuteNonQuery();
-
-            //string insert = "INSERT INTO pages(PID,Name,Size,URL,IsActual) VALUES ('" + file.PID + "','" +
-            //                                                             file.Name + "','" +
-            //                                                             file.Size + "','" +
-            //                                                             file.URL + "','" +
-            //                                                             file.IsActual +  "');";
-            //MySqlScript insertScript = new MySqlScript(DB, insert);
-            //insertScript.Execute();
         }
+        public void Update(string table, NameValueCollection data, int Id)
+        {
+            string query = String.Format("UPDATE {0} SET ", table);
+            //string columns = " (";
+            string buf = "";
+
+            foreach (string column in data.Keys)
+            {
+                string value = data[column];
+                //columns += String.Format(" {0},", column);
+                buf += String.Format("{0}='{1}',", column,value);
+            }
+            buf = buf.Substring(0, buf.Length - 1);
+            //values = values.Substring(0, values.Length - 1) + ")";
+            query += buf +String.Format(" WHERE Id={0};",Id) ;
+
+            MySqlScript updateScript = new MySqlScript(DB, query);
+            updateScript.Execute();
+        }
+        #endregion
+
     }
+
 
     public class Page
     {
@@ -382,31 +572,49 @@ namespace KnowledgeBase
         public int IsTerminate { get; set; }
         public int InfoNotAllowed { get; set; }
         public int ChildCount { get; set; }
+        public int IsActual { get; set; }
         public List<Files> Files { get; set; }
 
-        public static List<Page> SelectPages(MySqlDataReader select)
+        public PageColumns Columns { get; }
+
+
+        /// <summary>
+        /// Возвращает NameValueCollection, где Keys-названия столбцов, Values-их значения
+        /// </summary>
+        /// <param name="columns"></param>
+        /// <returns></returns>
+        public NameValueCollection GetNameValueCollection(params PageColumns[] columns)
         {
-            List<Page> result = new List<Page>();
-            while (select.Read())
+
+            string[] Fields = new string[] { "Id", "URL", "Parent", "Author", "Updated", "Header", "InnerText", "IsTerminate", "InfoNotAllowed", "ChildCount","IsActual" };
+            string[] Values = new string[] {Id.ToString(),URL,Parent.ToString(),Author,Updated,Header,InnerText,IsTerminate.ToString(),InfoNotAllowed.ToString(),ChildCount.ToString(),IsActual.ToString()};
+            NameValueCollection result = new NameValueCollection();
+            foreach(PageColumns column in columns)
             {
-                Page nextPage = new Page
-                {
-                    Id = select.GetInt32(0),
-                    URL = select.GetString(1),
-                    Parent = select.GetInt32(2),
-                    Author = select.GetString(3),
-                    Updated = select.GetDateTime(4).ToString(),
-                    Header = select.GetString(5),
-                    InnerText = select.GetString(6),
-                    IsTerminate = select.GetInt32(7),
-                    InfoNotAllowed = select.GetInt32(8),
-                    ChildCount = select.GetInt32(9)
-                };
-                result.Add(nextPage);
+                result.Add(Fields[(int)column],Values[(int)column]);
             }
             return result;
-        }
+        }         
     }
+
+    /// <summary>
+    /// Перечисление, содержащее список столбцов таблицы Pages
+    /// </summary>
+    public enum PageColumns
+    {
+        Id,
+        URL,
+        Parent,
+        Author,
+        Updated,
+        Header,
+        InnerText,
+        IsTerminate,
+        InfoNotAllowed,
+        ChildCount,
+        IsActual
+    }
+
     public class Files
     {
         public int Id { get; set; }
@@ -443,21 +651,82 @@ namespace KnowledgeBase
             MySqlConnection DB = dbParams.Fields.Connection;
             DB.Open();
             KnowledgeBaseSaver kb = new KnowledgeBaseSaver(firefox, DB, kBParams);
-            Page rootPage = new Page
-            {
-                URL = "https://help.bars-open.ru/index.php?/Knowledgebase/List",
-                Parent = 0,
-                Header = "База знаний",
-                IsTerminate = 0,
-                Updated = "0001-01-01 00:00:00"
-            };
-            //kb.Traversing(rootPage);
-            //kb.AddFiles();
+            List<Page> pgs = kb.SelectPages("Select * From pages");
+            kb.AuthParams = new AuthFields();
+            //foreach(Page pg in pgs)
+            //{
+            //    NameValueCollection col = new NameValueCollection();
+            //    col.Add("IsActual","1");
+            //    kb.Update("pages", col, pg.Id);
+            //}
+            //Page rootPage = new Page
+            //{
+            //    URL = "https://help.bars-open.ru/index.php?/Knowledgebase/List",
+            //    Parent = 0,
+            //    Header = "База знаний",
+            //    IsTerminate = 0,
+            //    Updated = "0001-01-01 00:00:00"
+            //};
+            //int rootPageId=kb.InsertPage(rootPage);
+            //List<Page> savingCategories = new List<Page>();
+            //Page Svody = new Page
+            //{
+            //    URL = "https://help.bars-open.ru/index.php?/Knowledgebase/List/Index/26/web-svody",
+            //    Parent = rootPageId,
+            //    Header = "Web-Своды",
+            //    IsTerminate = 0,
+            //    Updated = "0001-01-01 00:00:00"
+            //};
+            //Page Zdrav = new Page
+            //{
+            //    URL = "https://help.bars-open.ru/index.php?/Knowledgebase/List/Index/35/zdravoohranenie",
+            //    Parent = rootPageId,
+            //    Header = "Здравоохранение",
+            //    IsTerminate = 0,
+            //    Updated = "0001-01-01 00:00:00"
+            //};
+            //Page Bydzet = new Page
+            //{
+            //    URL = "https://help.bars-open.ru/index.php?/Knowledgebase/List/Index/245/byudzhet-onlajn",
+            //    Parent = rootPageId,
+            //    Header = "Бюджет Онлайн",
+            //    IsTerminate = 0,
+            //    Updated = "0001-01-01 00:00:00"
+            //};
+            //Page Razr = new Page
+            //{
+            //    URL = "https://help.bars-open.ru/index.php?/Knowledgebase/List/Index/247/razrabotka",
+            //    Parent = rootPageId,
+            //    Header = "Разработка",
+            //    IsTerminate = 0,
+            //    Updated = "0001-01-01 00:00:00"
+            //};
+            //Page BFO = new Page
+            //{
+            //    URL = "https://help.bars-open.ru/index.php?/Knowledgebase/List/Index/107/bfo",
+            //    Parent = rootPageId,
+            //    Header = "БФО",
+            //    IsTerminate = 0,
+            //    Updated = "0001-01-01 00:00:00"
+            //};
+            //savingCategories.Add(Svody);
+            //savingCategories.Add(Zdrav);
+            //savingCategories.Add(Bydzet);
+            //savingCategories.Add(Razr);
+            //savingCategories.Add(BFO);
 
+            //foreach(Page category in savingCategories)
+            //{
+            //    kb.TraversingPages(category);
+            //}
+
+            //kb.TraversingPages(rootPage);
+            kb.TraversingFiles();
+            //kb.InsertPage(rootPage);
             NameValueCollection cc = new NameValueCollection();
             cc.Add("Id", "12544");
             cc.Add("sssss", "ssssscdecde");
-            kb.InsertQueryString("table",cc);
+            //kb.Insert("table",cc);
             WikiApi wikiApi = new WikiApi()
             {
                 Host = "http://localhost",
