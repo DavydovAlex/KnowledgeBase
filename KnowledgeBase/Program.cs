@@ -15,6 +15,7 @@ using System.Net;
 using System.Collections.Specialized;
 using Newtonsoft.Json;
 using System.Net.Http;
+using System.Security.Cryptography;
 
 namespace KnowledgeBase
 {
@@ -81,18 +82,18 @@ namespace KnowledgeBase
                     try
                     {
                         List<Page> isPageExist = SelectPages(String.Format("SELECT * FROM pages WHERE URL='{0}' ORDER BY Updated DESC", page.URL));
-                        string ss = DateTime.Parse(isPageExist[0].Updated.Replace('.', '/')).ToString("yyyy-MM-dd HH:mm:00");
-                        if (page.Updated != DateTime.Parse(isPageExist[0].Updated.Replace('.', '/')).ToString("yyyy-MM-dd HH:mm:00")) 
+                        string newTime = DateTime.Parse(isPageExist[0].Updated.Replace('.', '/')).ToString("yyyy-MM-dd HH:mm:00");
+                        if (page.Updated != newTime) 
                         {
-                            //NameValueCollection updParams = new NameValueCollection();
-                            //updParams.Add();
-                            //Update("pages",,);
-                            //int newPage=
+                            NameValueCollection updParams = new NameValueCollection();
+                            updParams.Add("IsActual","0");
+                            Update("pages",updParams,page.Id);
                             page.Id = InsertPage(page);
                         }
                     }
                     catch
-                    {                       
+                    {       
+                        //Исключение возникает если страницы не существует
                         page.Id = InsertPage(page);
                     }
                     
@@ -167,11 +168,46 @@ namespace KnowledgeBase
         public void TraversingFiles()
         {
             List<Page> terminatePages = SelectTerminatePages();
+
+            List<int> traverse = new List<int>();
+            try
+            {
+                traverse=TraversedFiles();
+            }
+            catch
+            {
+
+            }
+               
             foreach (Page terminatePage in terminatePages)
             {
                 Driver.Navigate().GoToUrl(terminatePage.URL);
                 IReadOnlyCollection<IWebElement> attachmentItems = Driver.FindElements(Params.Attachements.ToByXPath());
-                List<Files> attachmentFiles = new List<Files>();
+
+                //List<Files> attachedFiles = new List<Files>();
+                //try
+                //{
+                //    attachedFiles=SelectAttachedFiles(terminatePage.Id);
+                //}
+                //catch
+                //{
+
+                //}
+                if (traverse.Count > 0)
+                {
+                    bool PageChecked = false;
+                    foreach (int pid in traverse)
+                    {
+                        if (terminatePage.Id == pid)
+                        {
+                            PageChecked = true;
+                            break;
+                        }
+
+                    }
+                    if (PageChecked)
+                        continue;
+                }
                 foreach (IWebElement attachment in attachmentItems)
                 {
                     bool HaveError = true;
@@ -180,12 +216,13 @@ namespace KnowledgeBase
                     {
                         try
                         {
-                            if (errorCount == 10)
-                            {
-                                errorCount = 0;
-                                Driver.Authorise(AuthParams.Login.Path.ToByXPath(), AuthParams.Login.Value, AuthParams.Password.Path.ToByXPath(), AuthParams.Password.Value, AuthParams.SendButton.ToByXPath(),10);
-                                Driver.Navigate().GoToUrl(terminatePage.URL);
-                            }
+                            //if (errorCount == 20)
+                            //{
+                            //    errorCount = 0;
+                            //    Driver.Navigate().GoToUrl(AuthParams.LogInPage);
+                            //    Driver.Authorise(AuthParams.Login.Path.ToByXPath(), AuthParams.Login.Value, AuthParams.Password.Path.ToByXPath(), AuthParams.Password.Value, AuthParams.SendButton.ToByXPath(),10);
+                            //    Driver.Navigate().GoToUrl(terminatePage.URL);
+                            //}
                             string[] files = Directory.GetFiles(Params.TempFolder);
                             foreach (string name in files)
                             {
@@ -198,9 +235,22 @@ namespace KnowledgeBase
                             file.IsActual = 1;
                             string g = attachment.GetAttribute("onclick");
                             file.URL = Regex.Match(attachment.GetAttribute("onclick"), @"(?<=javascript: PopupSmallWindow\()[\S\s]+?(?=\);)").Value;
+                            //if (traverse.Count > 0)
+                            //{
+                            //    bool PageChecked = false;
+                            //    foreach(int pid in traverse)
+                            //    {
+                            //        if(file.PID==attacheddFile.PID && file.URL==attacheddFile.URL)
+                            //        {
+                            //            FileExist = true;
+                            //        }
 
+                            //    }
+                            //    if (FileExist)
+                            //        break;
+                            //}
                             //List<>
-                            
+
                             string[] sizeName = SplitNameSize(attachment.Text);
                             file.Size = sizeName[0];
                             file.Name = sizeName[1];
@@ -398,6 +448,115 @@ namespace KnowledgeBase
 
             command.ExecuteNonQuery();
         }
+        public bool HasDuplicates()
+        {
+            bool result = false;
+            //List<Files> result = new List<Files>();
+            MySqlCommand selectFiles = DB.CreateCommand();
+            selectFiles.CommandText = String.Format("Select count(Name),count(Distinct Name) from files");
+            MySqlDataReader selectedFiles = selectFiles.ExecuteReader();
+            while (selectedFiles.Read())
+            {
+                int Distinct=selectedFiles.GetInt32(0);
+                int count= selectedFiles.GetInt32(1);
+                if (Distinct == count)
+                    result = false;
+                else
+                    result = true;
+            }
+            selectedFiles.Close();
+            return result;
+        }
+        public List<int> TraversedFiles()
+        {
+            List<int> result = new List<int>();
+            //List<Files> result = new List<Files>();
+            MySqlCommand selectFiles = DB.CreateCommand();
+            selectFiles.CommandText = String.Format("SELECT DISTINCT PID FROM files");
+            MySqlDataReader selectedFiles = selectFiles.ExecuteReader();
+            while (selectedFiles.Read())
+            {
+                result.Add(selectedFiles.GetInt32(0));
+            }
+            selectedFiles.Close();
+            return result;
+        }
+        public List<Files> SelectAttachedFiles(int pid)
+        {
+            List<Files> result = new List<Files>();
+            MySqlCommand selectFiles = DB.CreateCommand();
+            selectFiles.CommandText = String.Format("SELECT * FROM files WHERE IsActual=1 AND PID={0}",pid);
+            MySqlDataReader selectedFiles = selectFiles.ExecuteReader();
+            while (selectedFiles.Read())
+            {
+                Files nextPage = new Files
+                {
+                    Id = selectedFiles.GetInt32(0),
+                    PID = selectedFiles.GetInt32(1),
+                    Name = selectedFiles.GetString(2),
+                    Size = selectedFiles.GetString(3),
+                    URL = selectedFiles.GetString(4),
+                    IsActual = selectedFiles.GetInt32(5)
+                };
+                long size = selectedFiles.GetBytes(6, 0, null, 0, 0);
+                byte[] buf = new byte[size];
+                int bufferSize = 1024;
+                long bytesRead = 0;
+                int curPos = 0;
+                while (bytesRead < size)
+                {
+                    if (size - bytesRead >= bufferSize)
+                        bytesRead += selectedFiles.GetBytes(6, curPos, buf, curPos, bufferSize);
+                    else
+                        bytesRead += selectedFiles.GetBytes(6, curPos, buf, curPos, (int)(size - bytesRead));
+                    curPos += bufferSize;
+                }
+                nextPage.File = buf;
+                result.Add(nextPage);
+            }
+            selectedFiles.Close();
+            return result;
+        }
+        /// <summary>
+        /// Выбор файлов из БД
+        /// </summary>
+        /// <returns></returns>
+        public List<Files> SelectFiles(int Id)
+        {
+            List<Files> result = new List<Files>();
+            MySqlCommand selectFiles = DB.CreateCommand();
+            selectFiles.CommandText = String.Format("SELECT * FROM files WHERE PID='{0}'",Id);
+            MySqlDataReader selectedFiles = selectFiles.ExecuteReader();
+            while (selectedFiles.Read())
+            {
+                Files nextPage = new Files
+                {
+                    Id = selectedFiles.GetInt32(0),
+                    PID = selectedFiles.GetInt32(1),
+                    Name = selectedFiles.GetString(2),
+                    Size = selectedFiles.GetString(3),
+                    URL = selectedFiles.GetString(4),
+                    IsActual = selectedFiles.GetInt32(5)
+                };
+                long size = selectedFiles.GetBytes(6, 0, null, 0, 0);
+                byte[] buf = new byte[size];
+                int bufferSize = 1024;
+                long bytesRead = 0;
+                int curPos = 0;
+                while (bytesRead < size)
+                {
+                    if (size - bytesRead >= bufferSize)
+                        bytesRead += selectedFiles.GetBytes(6, curPos, buf, curPos, bufferSize);
+                    else
+                        bytesRead += selectedFiles.GetBytes(6, curPos, buf, curPos, (int)(size - bytesRead));
+                    curPos += bufferSize;
+                }
+                nextPage.File = buf;
+                result.Add(nextPage);
+            }
+            selectedFiles.Close();
+            return result;
+        }
         /// <summary>
         /// Выбор файлов из БД
         /// </summary>
@@ -472,7 +631,7 @@ namespace KnowledgeBase
             //MySqlDataReader selectedInfo = selectInfo.ExecuteReader();
             //List<Page> result = Page.SelectPages(selectedInfo);
             //selectedInfo.Close();
-            List<Page> result = SelectPages("SELECT * FROM pages WHERE IsTerminate=1");
+            List<Page> result = SelectPages("SELECT * FROM pages WHERE IsTerminate=1 AND IsActual=1");
             return result;
         }
         public List<Page> SelectNonTerminatePages()
@@ -653,6 +812,9 @@ namespace KnowledgeBase
             KnowledgeBaseSaver kb = new KnowledgeBaseSaver(firefox, DB, kBParams);
             List<Page> pgs = kb.SelectPages("Select * From pages");
             kb.AuthParams = new AuthFields();
+
+
+            
             //foreach(Page pg in pgs)
             //{
             //    NameValueCollection col = new NameValueCollection();
@@ -720,18 +882,25 @@ namespace KnowledgeBase
             //    kb.TraversingPages(category);
             //}
 
-            //kb.TraversingPages(rootPage);
-            kb.TraversingFiles();
+            //kb.TraversingPages(rootPage);///////////////////
+            //kb.TraversingFiles();///////////////////
             //kb.InsertPage(rootPage);
-            NameValueCollection cc = new NameValueCollection();
-            cc.Add("Id", "12544");
-            cc.Add("sssss", "ssssscdecde");
+            //bool k = kb.HasDuplicates();
+            //NameValueCollection cc = new NameValueCollection();
+            //cc.Add("Id", "12544");
+            //cc.Add("sssss", "ssssscdecde");
             //kb.Insert("table",cc);
+            //WikiApi wikiApi = new WikiApi()
+            //{
+            //    Host = "http://localhost",
+            //    Login="Admin",
+            //    Password="25632541789"
+            //};
             WikiApi wikiApi = new WikiApi()
             {
-                Host = "http://localhost",
-                Login="Admin",
-                Password="25632541789"
+                Host = "http://10.1.4.200",
+                Login = "Bot",
+                Password = @"\Gy+YGtBy'M5[U@<"
             };
             WebHeaderCollection Header = new WebHeaderCollection();
             Header.Add(HttpRequestHeader.UserAgent, "Mozilla/5.0 (Windows NT 10.0; Win64; x64; rv:56.0) Gecko/20100101 Firefox/56.0");
@@ -746,27 +915,36 @@ namespace KnowledgeBase
             //string rrr=wikiApi.UploadFile(ff[0].File,"1234567.zip");
             //File.WriteAllBytes(kBParams.Fields.TempFolder+"/"+ff[0].Name,ff[0].File);
 
-            List<Page> nonTerminatePages = kb.SelectNonTerminatePages();
-            foreach (Page page in nonTerminatePages)
-            {
-                if (page.Parent != 0)
-                {
-                    Page parent = new Page();
-                    foreach (Page parentPage in nonTerminatePages)
-                    {
-                        if (page.Parent == parentPage.Id)
-                        {
-                            parent = parentPage;
-                            string res = wikiApi.EditPage("Категория:" + page.Header, "[[Category:" + parent.Header + "]]");
-                            break;
-                        }
 
-                    }
-                    
+            //List<Page> nonTerminatePages = kb.SelectNonTerminatePages();
+            //foreach (Page page in nonTerminatePages)
+            //{
+            //    if (page.Parent != 0)
+            //    {
+            //        Page parent = new Page();
+            //        foreach (Page parentPage in nonTerminatePages)
+            //        {
+            //            if (page.Parent == parentPage.Id)
+            //            {
+            //                Thread.Sleep(1000);
+            //                parent = parentPage;
+            //                string res = wikiApi.EditPage("Категория:" + page.Header, "[[Category:" + parent.Header + "]]");
+            //                break;
+            //            }
 
-                }
-            }
+            //        }
 
+
+            //    }
+            //}
+            List<Files> toWiki = kb.SelectFiles();
+            //foreach (Files file in toWiki)
+            //{
+            //    //string ext = Path.GetExtension(file.Name);
+            //    //string name = Path.GetFileNameWithoutExtension(file.Name).GetHashCode().ToString();
+            //    string res = wikiApi.UploadFile(file.File, file.Name);
+            //}
+            //SELECT * FROM kb.pages where Header Like '%#%' OR Header Like '%<%' OR Header Like '%>%' OR Header Like '%[%' OR Header Like '%]%' OR Header Like '%|%' OR  Header Like '%{%' OR Header Like '%}%'
             List<Page> terminatePages = kb.SelectTerminatePages();
             foreach(Page page in terminatePages)
             {
@@ -775,11 +953,41 @@ namespace KnowledgeBase
                 string innerText = HttpUtility.HtmlDecode(page.InnerText);
                 string divOpen=Regex.Replace(innerText, @"<[\s]*pre", "<div nowrap=\"true\"");
                 string divClose= Regex.Replace(divOpen, @"</[\s]*pre[\s]*>", "</div>");
-                string text = divClose+ Environment.NewLine + "[[Category:" + parent.Header + "]]";
-                    res = wikiApi.EditPage(page.Header,text);
+                string attach = @"'''Вложения'''"+Environment.NewLine+"----"+Environment.NewLine;
+                string text = divClose + Environment.NewLine;
+                List <Files> files = new List<Files>();
+                try
+                {
+                    foreach(Files loaded in toWiki)
+                    {
+                        if(loaded.PID==page.Id)
+                        {
+                            files.Add(loaded);
+                        }
+                    }
+                    //files = kb.SelectFiles(page.Id);
+                    if(files.Count>0)
+                    {
+                        text += attach;
+                        foreach(Files file in files)
+                        {
+                            text += "[[:File:" + file.Name + "]]"+"<br>";
+                        }
+                        text += Environment.NewLine+ "----" + Environment.NewLine;
+                    }
+                }
+                catch
+                {
 
+                }
+                
+                 text +=  "[[Category:" + parent.Header + "]]";
+                    res = wikiApi.EditPage(page.Header,text);
+                Thread.Sleep(2000);
                     
             }
+            
+            
         }
     }
 
@@ -858,20 +1066,8 @@ namespace KnowledgeBase
     //Можно установить прокси сервер
     public class WebQuery
     {
-        //Запрещает/ разрешает автоматический редирект
-        bool _allowAutoRedirect;
-        public bool AllowAutoRedirect
-        {
-            get { return _allowAutoRedirect; }
-            set { _allowAutoRedirect = value; }
-        }
-
-        //Возвращает код ответа
-        int _responceStatus;
-        public int ResponceStatusCode
-        {
-            get { return _responceStatus; }
-        }
+        public bool AllowAutoRedirect { get; set; }
+        public int ResponceStatusCode { get; private set; }
 
         //Устанавливает прокси
         IWebProxy _proxy;
@@ -920,7 +1116,7 @@ namespace KnowledgeBase
             _headers = new WebHeaderCollection();
             _responceHeaders = new WebHeaderCollection();
             _cookie = new CookieCollection();
-            _allowAutoRedirect = true;// редирект разрешен
+            AllowAutoRedirect = true;// редирект разрешен
         }
 
         //Установка заголовкой запроса
@@ -960,7 +1156,7 @@ namespace KnowledgeBase
         }
         void SetAllowAutoRedirect(ref HttpWebRequest request)
         {
-            request.AllowAutoRedirect = _allowAutoRedirect;
+            request.AllowAutoRedirect = AllowAutoRedirect;
         }
         void SetProxy(ref HttpWebRequest request)
         {
@@ -1004,7 +1200,7 @@ namespace KnowledgeBase
                 HtmlResponse = reader.ReadToEnd();
             }
             _responceUri = responce.ResponseUri;
-            _responceStatus = (int)responce.StatusCode;
+            ResponceStatusCode = (int)responce.StatusCode;
 
             //Обновление куки
             CookieCollection bufCookies = new CookieCollection();
@@ -1091,7 +1287,7 @@ namespace KnowledgeBase
                 HtmlResponse = reader.ReadToEnd();
             }
             _responceUri = responce.ResponseUri;
-            _responceStatus = (int)responce.StatusCode;
+            ResponceStatusCode = (int)responce.StatusCode;
 
             //Обновление куки
             CookieCollection bufCookies = new CookieCollection();
